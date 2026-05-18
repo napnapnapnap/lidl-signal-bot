@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import glob
+import getpass
 import html
 import json
 import math
@@ -22,6 +23,8 @@ from typing import Any
 
 SUMMARY_URL = "https://www.lidl.co.uk/mre/api/v1/tickets"
 DETAIL_URL = "https://www.lidl.co.uk/mre/api/v1/tickets/{ticket_id}"
+LIDL_HOME_URL = "https://www.lidl.co.uk/mla/"
+DEFAULT_AUTH_STATE_FILENAME = "lidl_auth_state.json"
 
 
 class RateLimiter:
@@ -83,6 +86,178 @@ def write_json(path: Path, data: Any) -> None:
     tmp_path.replace(path)
 
 
+def print_err(message: str) -> None:
+    print(message, file=sys.stderr)
+
+
+def auth_state_path(args: argparse.Namespace) -> Path | None:
+    if args.no_auth_state:
+        return None
+    if args.auth_state:
+        return args.auth_state.expanduser().resolve()
+    return args.data_dir / DEFAULT_AUTH_STATE_FILENAME
+
+
+def cookie_header_from_cookies(cookies: list[dict[str, Any]], request_path: str = "/mre/api/v1/tickets") -> str:
+    now = time.time()
+    pairs = []
+    for cookie in cookies:
+        name = cookie.get("name")
+        value = cookie.get("value")
+        if not name or value is None:
+            continue
+
+        domain = str(cookie.get("domain") or "").lstrip(".")
+        if domain and domain != "www.lidl.co.uk" and not "www.lidl.co.uk".endswith(f".{domain}"):
+            continue
+
+        path = str(cookie.get("path") or "/")
+        if not request_path.startswith(path.rstrip("/") or "/"):
+            continue
+
+        expires = float(cookie.get("expires") or -1)
+        if expires > 0 and expires < now:
+            continue
+
+        pairs.append(f"{name}={value}")
+
+    return "; ".join(pairs)
+
+
+def cookie_header_from_auth_state(path: Path) -> str | None:
+    if not path.exists():
+        return None
+    try:
+        state = read_json(path)
+    except Exception as exc:  # noqa: BLE001 - explain the bad cache and continue to other auth sources
+        print_err(f"Ignoring unreadable Lidl auth state {path}: {exc}")
+        return None
+    cookie = cookie_header_from_cookies(list(state.get("cookies", [])))
+    return cookie or None
+
+
+def validate_cookie(args: argparse.Namespace, cookie: str) -> bool:
+    try:
+        get_json(
+            make_headers(cookie),
+            SUMMARY_URL,
+            {"country": args.country, "page": 1},
+            RateLimiter(0),
+            args.insecure,
+        )
+    except urllib.error.URLError as exc:
+        if isinstance(exc.reason, ssl.SSLError):
+            raise SystemExit(
+                "TLS certificate verification failed while validating Lidl auth. "
+                "Use --insecure only if this is a controlled local trust-store issue."
+            ) from None
+        return False
+    except Exception:
+        return False
+    return True
+
+
+def resolve_login_credentials(args: argparse.Namespace) -> tuple[str, str]:
+    email = args.email or os.environ.get("LIDL_EMAIL")
+    password = os.environ.get("LIDL_PASSWORD")
+
+    if args.password_stdin:
+        password = sys.stdin.readline().rstrip("\n")
+
+    if not email:
+        if sys.stdin.isatty():
+            email = input("Lidl email: ").strip()
+        else:
+            raise SystemExit("Missing Lidl email. Provide --email or set LIDL_EMAIL.")
+    if not password:
+        if sys.stdin.isatty():
+            password = getpass.getpass("Lidl password: ")
+        else:
+            raise SystemExit("Missing Lidl password. Set LIDL_PASSWORD or pass --password-stdin.")
+
+    return email, password
+
+
+def login_with_browser(args: argparse.Namespace) -> str:
+    try:
+        from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+        from playwright.sync_api import sync_playwright
+    except ImportError as exc:
+        raise SystemExit(
+            "Credential login requires Playwright for Python. Install it with "
+            "`python3 -m pip install playwright` and `python3 -m playwright install chromium`."
+        ) from exc
+
+    state_path = auth_state_path(args)
+    headed = args.auth_headed or args.auth_interactive
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(headless=not headed, channel=args.auth_browser_channel)
+
+        if state_path and state_path.exists():
+            context = browser.new_context(locale="en-GB", storage_state=str(state_path))
+            page = context.new_page()
+            page.goto(LIDL_HOME_URL, wait_until="domcontentloaded", timeout=args.auth_timeout * 1000)
+            try:
+                page.wait_for_load_state("networkidle", timeout=10_000)
+            except PlaywrightTimeoutError:
+                pass
+            cookie = cookie_header_from_cookies(context.cookies(["https://www.lidl.co.uk"]))
+            if cookie and validate_cookie(args, cookie):
+                browser.close()
+                print_err(f"Using saved Lidl browser auth state from {state_path}.")
+                return cookie
+            context.close()
+            print_err("Saved Lidl browser auth state is missing or expired; logging in again.")
+
+        context = browser.new_context(locale="en-GB")
+        page = context.new_page()
+        page.goto(LIDL_HOME_URL, wait_until="domcontentloaded", timeout=args.auth_timeout * 1000)
+
+        if args.auth_interactive:
+            print_err(
+                "Complete the Lidl login in the opened browser window. "
+                "The script will continue after the browser reaches www.lidl.co.uk/mla/."
+            )
+        elif "accounts.lidl.com" in page.url:
+            email, password = resolve_login_credentials(args)
+            email_input = page.locator('[data-testid="input-email"], #input-email').first
+            email_input.wait_for(state="visible", timeout=args.auth_timeout * 1000)
+            email_input.fill(email)
+            page.locator('[data-testid="login-or-register-submit-button"]').click(timeout=15_000)
+
+            password_input = page.locator('[data-testid="login-input-password"], #Password').first
+            password_input.wait_for(state="visible", timeout=args.auth_timeout * 1000)
+            password_input.fill(password)
+            page.locator('[data-testid="button-primary"]').click(timeout=15_000)
+
+        try:
+            page.wait_for_url("https://www.lidl.co.uk/mla/**", timeout=args.auth_timeout * 1000)
+        except PlaywrightTimeoutError:
+            pass
+        try:
+            page.wait_for_load_state("networkidle", timeout=15_000)
+        except PlaywrightTimeoutError:
+            pass
+
+        cookie = cookie_header_from_cookies(context.cookies(["https://www.lidl.co.uk"]))
+        if not cookie or not validate_cookie(args, cookie):
+            current_url = page.url
+            browser.close()
+            raise SystemExit(
+                "Lidl browser login did not produce an authenticated receipt session. "
+                f"Current page: {current_url}. If Lidl shows a bot check or MFA challenge, rerun with "
+                "--auth-interactive and complete the login manually once."
+            )
+
+        if state_path:
+            state_path.parent.mkdir(parents=True, exist_ok=True)
+            context.storage_state(path=str(state_path))
+            print_err(f"Saved Lidl browser auth state to {state_path}.")
+
+        browser.close()
+        return cookie
+
+
 def require_cookie(args: argparse.Namespace) -> str:
     cached_cookie = getattr(args, "_cookie_value", None)
     if cached_cookie:
@@ -91,8 +266,17 @@ def require_cookie(args: argparse.Namespace) -> str:
         cookie = sys.stdin.read().strip()
     else:
         cookie = args.cookie or os.environ.get("LIDL_COOKIE")
+    if not cookie and args.login:
+        cookie = login_with_browser(args)
     if not cookie:
-        raise SystemExit("Missing Lidl cookie. Provide --cookie or set LIDL_COOKIE to the full Cookie header.")
+        state_path = auth_state_path(args)
+        if state_path:
+            cookie = cookie_header_from_auth_state(state_path)
+    if not cookie:
+        raise SystemExit(
+            "Missing Lidl authentication. Provide --cookie, set LIDL_COOKIE, or use --login with "
+            "LIDL_EMAIL and LIDL_PASSWORD."
+        )
     setattr(args, "_cookie_value", cookie)
     return cookie
 
@@ -436,6 +620,29 @@ def command_update(args: argparse.Namespace) -> None:
         print("No new receipt summaries found.")
 
 
+def command_auth_check(args: argparse.Namespace) -> None:
+    cookie = require_cookie(args)
+    data = get_json(
+        make_headers(cookie),
+        SUMMARY_URL,
+        {"country": args.country, "page": 1},
+        RateLimiter(args.rate),
+        args.insecure,
+    )
+    items = list(data.get("items", []))
+    print(
+        json.dumps(
+            {
+                "authenticated": True,
+                "totalCount": data.get("totalCount"),
+                "page_size": data.get("size"),
+                "first_receipt_date": items[0].get("date") if items else None,
+            },
+            indent=2,
+        )
+    )
+
+
 def parse_float(value: str | None) -> float | None:
     if value in {None, ""}:
         return None
@@ -609,13 +816,33 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Fetch and parse Lidl UK digital receipts.")
     parser.add_argument(
         "command",
-        choices=["summaries", "summaries-since", "details", "parse", "all", "update", "status", "query"],
+        choices=["auth-check", "summaries", "summaries-since", "details", "parse", "all", "update", "status", "query"],
     )
     parser.add_argument("--data-dir", type=Path, default=Path("data"))
     parser.add_argument("--country", default="GB")
     parser.add_argument("--language-code", default="en-GB")
     parser.add_argument("--cookie", help="Full Lidl Cookie header. Prefer LIDL_COOKIE instead.")
     parser.add_argument("--cookie-stdin", action="store_true", help="Read the full Lidl Cookie header from stdin.")
+    parser.add_argument("--login", action="store_true", help="Use Playwright to log in with Lidl credentials.")
+    parser.add_argument("--email", help="Lidl login email. Prefer LIDL_EMAIL for agent runs.")
+    parser.add_argument("--password-stdin", action="store_true", help="Read the Lidl password from the first stdin line.")
+    parser.add_argument(
+        "--auth-state",
+        type=Path,
+        help="Playwright storage-state path. Defaults to data/lidl_auth_state.json when --login is used.",
+    )
+    parser.add_argument("--no-auth-state", action="store_true", help="Do not read or write browser auth state.")
+    parser.add_argument("--auth-headed", action="store_true", help="Show the browser during credential login.")
+    parser.add_argument(
+        "--auth-interactive",
+        action="store_true",
+        help="Open a browser and wait for the user to complete Lidl login manually, then save auth state.",
+    )
+    parser.add_argument(
+        "--auth-browser-channel",
+        help="Optional Playwright browser channel for login, for example chrome.",
+    )
+    parser.add_argument("--auth-timeout", type=int, default=90, help="Browser login timeout in seconds.")
     parser.add_argument("--rate", type=float, default=3.0, help="Maximum API requests per second.")
     parser.add_argument("--insecure", action="store_true", help="Disable TLS certificate verification.")
     parser.add_argument("--since", help="Checkpoint date for summaries-since, for example 2026-05-07.")
@@ -641,6 +868,8 @@ def main(argv: list[str] | None = None) -> int:
         parse_receipts(args)
     if args.command == "update":
         command_update(args)
+    if args.command == "auth-check":
+        command_auth_check(args)
     if args.command == "status":
         command_status(args)
     if args.command == "query":
