@@ -1,0 +1,4 @@
+project_id              = "your-gcp-project-id"
+zone                    = "us-west1-a"
+existing_data_disk_name = ""  # Leave empty to create a new 10 GB disk
+                              # Set to disk name (e.g. "my-data-disk") to attach existing

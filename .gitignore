@@ -2,3 +2,20 @@ data/
 __pycache__/
 *.py[cod]
 .DS_Store
+
+# Terraform
+infra/.terraform/
+infra/.terraform.lock.hcl
+infra/terraform.tfvars
+infra/tfplan
+infra/*.tfstate
+infra/*.tfstate.backup
+
+# Data directory (receipt JSON files — not committed)
+data/receipts/
+data/receipts_summaries.json
+data/receipts_detail.json
+data/lidl_auth_state.json
+
+# Brainstorm artefacts
+.superpowers/
