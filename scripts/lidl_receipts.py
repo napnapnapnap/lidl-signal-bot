@@ -805,18 +805,43 @@ def parse_receipts(args: argparse.Namespace) -> None:
     }
     write_json(args.data_dir / "receipts_detail.json", output)
     print(f"Parsed {len(parsed)} receipts to {args.data_dir / 'receipts_detail.json'}")
-    print(f"Total articles: {total_articles}, discounts: {total_discounts}, spent: GBP {total_spent:.2f}")
+    print(f"Total articles: {total_articles}, discounts: {total_discounts}, spent: EUR {total_spent:.2f}")
     if errors:
         print("First parse errors:")
         for error in errors[:5]:
             print(f"  {error['id']}: {error['error']}")
 
 
+def command_card_totals(args: argparse.Namespace) -> None:
+    from collections import defaultdict
+    detail_file = args.data_dir / "receipts_detail.json"
+    if not detail_file.exists():
+        print(f"Error: {detail_file} not found. Run 'parse' first.")
+        return
+    with open(detail_file, encoding="utf-8") as f:
+        data = json.load(f)
+    
+    totals = defaultdict(float)
+    for receipt in data.get("receipts", []):
+        group_key = receipt.get("card_last4")
+        if not group_key:
+            group_key = receipt.get("payment_method") or "Unknown"
+
+        amount = receipt.get("total_amount") or 0.0
+        totals[group_key] += amount
+
+    sorted_totals = sorted(totals.items(), key=lambda item: item[1], reverse=True)
+    print("Totals by card_last4 (or payment method):")
+    for key, total in sorted_totals:
+        label = f"*{key}" if key and str(key).isdigit() and len(str(key)) == 4 else key
+        print(f"{label}: {total:.2f} EUR")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Fetch and parse Lidl UK digital receipts.")
     parser.add_argument(
         "command",
-        choices=["auth-check", "summaries", "summaries-since", "details", "parse", "all", "update", "status", "query"],
+        choices=["auth-check", "summaries", "summaries-since", "details", "parse", "all", "update", "status", "query", "card-totals"],
     )
     parser.add_argument("--data-dir", type=Path, default=Path("data"))
     parser.add_argument("--country", default="GB")
@@ -874,6 +899,8 @@ def main(argv: list[str] | None = None) -> int:
         command_status(args)
     if args.command == "query":
         command_query(args)
+    if args.command == "card-totals":
+        command_card_totals(args)
     return 0
 
 
