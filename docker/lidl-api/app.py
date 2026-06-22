@@ -132,7 +132,10 @@ def query(
         if "unauthorized" in err.lower() or "expired" in err.lower():
             raise HTTPException(status_code=401, detail=err)
         raise HTTPException(status_code=500, detail=err)
-    return json.loads(result.stdout)
+    try:
+        return json.loads(result.stdout)
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=502, detail=f"Invalid script output: {result.stdout[:500]}")
 
 
 def _normalize(text: str) -> str:
@@ -166,15 +169,20 @@ def _save_groups(groups: dict[str, str]) -> None:
 
 def _assign_group(name: str, groups: dict[str, str]) -> str:
     norm = _normalize(name)
-    best_key = max(
-        (k for k in groups if k in norm),
-        key=len,
-        default=None,
-    )
+    tokens = set(norm.split())
+    candidates = [
+        k for k in groups
+        if (" " in k and k in norm)                        # multi-word key: substring OK
+        or all(t in tokens for t in k.split())             # single-word key: whole token match
+    ]
+    best_key = max(candidates, key=len, default=None)
     if best_key:
         return groups[best_key]
     key = _first_significant_word(name)
-    display = name.split()[0] if name.strip() else key
+    display = next(
+        (w for w in name.split() if _normalize(w).strip(".,!?-()") == key),
+        name.split()[0] if name.strip() else key,
+    )
     groups[key] = display
     return display
 
