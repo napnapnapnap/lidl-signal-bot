@@ -32,6 +32,7 @@ jobs:
           host: ${{ secrets.VM_IP }}
           username: debian
           key: ${{ secrets.SSH_PRIVATE_KEY }}
+          command_timeout: 30m
           envs: LIDL_EMAIL,LIDL_PASSWORD,LIDL_COUNTRY,N8N_ENCRYPTION_KEY,SIGNAL_PHONE_NUMBER,SIGNAL_GROUP_ID
           script: |
             # Clone repo on first deploy
