@@ -13,14 +13,9 @@ until curl -sf http://localhost:5678/healthz > /dev/null 2>&1; do
 done
 echo " ready."
 
-echo "Importing workflows (auth-failure-alert first so others can reference it)..."
-for name in auth-failure-alert receipt-sync weekly-shopping-list ondemand-shopping-list; do
-  file="$WORKFLOWS_DIR/$name.json"
-  echo "  Importing $name..."
-  docker compose -f "$COMPOSE_FILE" exec -T n8n \
-    n8n import:workflow --input="$file" --separate || \
-    echo "  Warning: $name import returned non-zero (may already exist)"
-done
+echo "Importing workflows..."
+docker compose -f "$COMPOSE_FILE" exec -T n8n \
+  n8n import:workflow --input="$WORKFLOWS_DIR" --separate
 
 echo ""
 echo "Done. Workflows imported."
