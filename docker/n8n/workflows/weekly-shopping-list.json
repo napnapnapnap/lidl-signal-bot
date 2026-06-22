@@ -36,7 +36,7 @@
       "typeVersion": 2,
       "position": [750, 300],
       "parameters": {
-        "jsCode": "const items = $input.first().json.items || [];\nconst days = $input.first().json.days || 30;\nlet msg = `\u{1F6D2} Weekly shopping suggestions (last ${days} days):\\n\\n`;\nif (items.length === 0) {\n  msg += 'No data yet. Run an update first.';\n} else {\n  items.slice(0, 10).forEach((item, i) => {\n    msg += `${i + 1}. ${item.name} (${item.count}×)\\n`;\n  });\n}\nreturn [{ json: { message: msg.trim() } }];"
+        "jsCode": "const items = $input.first().json.items || [];\nconst days = $input.first().json.days || 30;\nlet msg = `🛒 Weekly shopping suggestions (last ${days} days):\\n\\n`;\nif (items.length === 0) {\n  msg += 'No data yet. Run an update first.';\n} else {\n  items.slice(0, 10).forEach((item, i) => {\n    msg += `${i + 1}. ${item.name} (${item.count}×)\\n`;\n  });\n}\nreturn [{ json: { message: msg.trim() } }];"
       }
     },
     {
