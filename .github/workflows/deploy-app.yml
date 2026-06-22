@@ -1,0 +1,59 @@
+name: Deploy App
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docker/**'
+      - 'scripts/**'
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-app
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy to VM
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          LIDL_EMAIL: ${{ secrets.LIDL_EMAIL }}
+          LIDL_PASSWORD: ${{ secrets.LIDL_PASSWORD }}
+          LIDL_COUNTRY: ${{ secrets.LIDL_COUNTRY }}
+          N8N_ENCRYPTION_KEY: ${{ secrets.N8N_ENCRYPTION_KEY }}
+          SIGNAL_PHONE_NUMBER: ${{ secrets.SIGNAL_PHONE_NUMBER }}
+          SIGNAL_GROUP_ID: ${{ secrets.SIGNAL_GROUP_ID }}
+        with:
+          host: ${{ secrets.VM_IP }}
+          username: debian
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          envs: LIDL_EMAIL,LIDL_PASSWORD,LIDL_COUNTRY,N8N_ENCRYPTION_KEY,SIGNAL_PHONE_NUMBER,SIGNAL_GROUP_ID
+          script: |
+            # Clone repo on first deploy
+            if [ ! -d /opt/lidl ]; then
+              sudo git clone https://github.com/napnapnapnap/lidl.git /opt/lidl
+              sudo chown -R debian:debian /opt/lidl
+            fi
+
+            cd /opt/lidl
+            git pull
+
+            # Write .env file using printf to safely handle special characters
+            {
+              printf 'LIDL_EMAIL=%s\n'          "$LIDL_EMAIL"
+              printf 'LIDL_PASSWORD=%s\n'       "$LIDL_PASSWORD"
+              printf 'LIDL_COUNTRY=%s\n'        "${LIDL_COUNTRY:-FR}"
+              printf 'N8N_ENCRYPTION_KEY=%s\n'  "$N8N_ENCRYPTION_KEY"
+              printf 'SIGNAL_PHONE_NUMBER=%s\n' "$SIGNAL_PHONE_NUMBER"
+              printf 'SIGNAL_GROUP_ID=%s\n'     "$SIGNAL_GROUP_ID"
+            } > docker/.env
+
+            cd docker
+            docker compose pull --quiet
+            docker compose up -d --build
+            docker compose ps
