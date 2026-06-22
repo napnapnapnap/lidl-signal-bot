@@ -1,0 +1,33 @@
+# Local dev — volumes from ./dev-data/, ports exposed, env from .env.dev.
+# Run with: docker compose -f docker/docker-compose.dev.yml up --build
+
+services:
+  n8n:
+    image: n8nio/n8n:latest
+    ports:
+      - "5678:5678"
+    env_file: .env.dev
+    environment:
+      - N8N_BLOCK_ENV_ACCESS_IN_NODE=false
+      - N8N_USER_MANAGEMENT_DISABLED=true
+    volumes:
+      - ./dev-data/n8n:/home/node/.n8n
+      - ./n8n/workflows:/workflows:ro
+
+  signal-cli-rest-api:
+    image: bbernhard/signal-cli-rest-api:latest
+    ports:
+      - "8080:8080"
+    environment:
+      - MODE=normal
+    volumes:
+      - ./dev-data/signal-cli:/home/.local/share/signal-cli
+
+  lidl-api:
+    build: ./lidl-api
+    ports:
+      - "8000:8000"
+    env_file: .env.dev
+    volumes:
+      - ./dev-data/receipts:/data
+      - ../scripts:/scripts:ro

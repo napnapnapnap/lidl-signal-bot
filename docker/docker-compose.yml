@@ -1,0 +1,44 @@
+# Production — volumes from /data (persistent disk), no exposed ports externally.
+# Access n8n UI via SSH tunnel: ssh -L 5678:localhost:5678 debian@VM_IP
+
+services:
+  n8n:
+    image: n8nio/n8n:latest
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5678:5678"
+    environment:
+      - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
+      - SIGNAL_GROUP_ID=${SIGNAL_GROUP_ID}
+      - SIGNAL_PHONE_NUMBER=${SIGNAL_PHONE_NUMBER}
+      - N8N_BLOCK_ENV_ACCESS_IN_NODE=false
+      - N8N_USER_MANAGEMENT_DISABLED=true
+    volumes:
+      - /data/n8n:/home/node/.n8n
+      - ./n8n/workflows:/workflows:ro
+    depends_on:
+      - signal-cli-rest-api
+      - lidl-api
+
+  signal-cli-rest-api:
+    image: bbernhard/signal-cli-rest-api:latest
+    restart: unless-stopped
+    environment:
+      - MODE=normal
+    volumes:
+      - /data/signal-cli:/home/.local/share/signal-cli
+    ports:
+      - "127.0.0.1:8080:8080"
+
+  lidl-api:
+    build: ./lidl-api
+    restart: unless-stopped
+    environment:
+      - LIDL_EMAIL=${LIDL_EMAIL}
+      - LIDL_PASSWORD=${LIDL_PASSWORD}
+      - LIDL_COUNTRY=${LIDL_COUNTRY:-FR}
+    volumes:
+      - /data/receipts:/data
+      - ../scripts:/scripts:ro
+    ports:
+      - "127.0.0.1:8000:8000"

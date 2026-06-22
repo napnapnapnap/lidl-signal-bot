@@ -19,3 +19,8 @@ data/lidl_auth_state.json
 
 # Brainstorm artefacts
 .superpowers/
+
+# Docker local dev
+docker/dev-data/
+docker/.env.dev
+docker/.env
