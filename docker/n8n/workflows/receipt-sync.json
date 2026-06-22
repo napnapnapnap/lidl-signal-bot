@@ -1,0 +1,40 @@
+{
+  "name": "Receipt Sync",
+  "nodes": [
+    {
+      "id": "b2c3d4e5-0001-0001-0001-000000000001",
+      "name": "Daily at 6am",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [250, 300],
+      "parameters": {
+        "rule": {
+          "interval": [{"field": "cronExpression", "expression": "0 6 * * *"}]
+        }
+      }
+    },
+    {
+      "id": "b2c3d4e5-0001-0001-0001-000000000002",
+      "name": "Trigger Update",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [500, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "http://lidl-api:8000/update",
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "Daily at 6am": {
+      "main": [[{"node": "Trigger Update", "type": "main", "index": 0}]]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "auth-failure-alert"
+  },
+  "id": "receipt-sync"
+}

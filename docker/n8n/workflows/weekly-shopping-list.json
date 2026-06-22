@@ -1,0 +1,76 @@
+{
+  "name": "Weekly Shopping List",
+  "nodes": [
+    {
+      "id": "c3d4e5f6-0001-0001-0001-000000000001",
+      "name": "Saturday at 9am",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [250, 300],
+      "parameters": {
+        "rule": {
+          "interval": [{"field": "cronExpression", "expression": "0 9 * * 6"}]
+        }
+      }
+    },
+    {
+      "id": "c3d4e5f6-0001-0001-0001-000000000002",
+      "name": "Get Top Items",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [500, 300],
+      "parameters": {
+        "method": "GET",
+        "url": "http://lidl-api:8000/top",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [{"name": "days", "value": "30"}]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "c3d4e5f6-0001-0001-0001-000000000003",
+      "name": "Format Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [750, 300],
+      "parameters": {
+        "jsCode": "const items = $input.first().json.items || [];\nconst days = $input.first().json.days || 30;\nlet msg = `\u{1F6D2} Weekly shopping suggestions (last ${days} days):\\n\\n`;\nif (items.length === 0) {\n  msg += 'No data yet. Run an update first.';\n} else {\n  items.slice(0, 10).forEach((item, i) => {\n    msg += `${i + 1}. ${item.name} (${item.count}×)\\n`;\n  });\n}\nreturn [{ json: { message: msg.trim() } }];"
+      }
+    },
+    {
+      "id": "c3d4e5f6-0001-0001-0001-000000000004",
+      "name": "Send to Signal",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1000, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "http://signal-cli-rest-api:8080/v2/send",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ message: $json.message, number: $env.SIGNAL_PHONE_NUMBER, recipients: [$env.SIGNAL_GROUP_ID] }) }}",
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "Saturday at 9am": {
+      "main": [[{"node": "Get Top Items", "type": "main", "index": 0}]]
+    },
+    "Get Top Items": {
+      "main": [[{"node": "Format Message", "type": "main", "index": 0}]]
+    },
+    "Format Message": {
+      "main": [[{"node": "Send to Signal", "type": "main", "index": 0}]]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "auth-failure-alert"
+  },
+  "id": "weekly-shopping-list"
+}

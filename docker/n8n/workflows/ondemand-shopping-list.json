@@ -1,0 +1,114 @@
+{
+  "name": "On-demand Shopping List",
+  "nodes": [
+    {
+      "id": "d4e5f6a7-0001-0001-0001-000000000001",
+      "name": "Signal Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 300],
+      "parameters": {
+        "path": "signal",
+        "httpMethod": "POST",
+        "responseMode": "onReceived",
+        "responseData": "noData"
+      },
+      "webhookId": "signal-incoming"
+    },
+    {
+      "id": "d4e5f6a7-0001-0001-0001-000000000002",
+      "name": "Is Shopping Command",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [500, 300],
+      "parameters": {
+        "conditions": {
+          "options": {"caseSensitive": false, "leftValue": "", "typeValidation": "strict"},
+          "conditions": [
+            {
+              "id": "cond-shopping",
+              "leftValue": "={{ ($json.envelope?.dataMessage?.message || '').toLowerCase().trim() }}",
+              "rightValue": "/shopping",
+              "operator": {"type": "string", "operation": "startsWith"}
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "d4e5f6a7-0001-0001-0001-000000000003",
+      "name": "Extract Days",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [750, 300],
+      "parameters": {
+        "jsCode": "const msg = $input.first().json.envelope?.dataMessage?.message || '';\nconst match = msg.match(/--days[\\s=]+(\\d+)/i);\nconst days = match ? parseInt(match[1], 10) : 30;\nreturn [{ json: { days } }];"
+      }
+    },
+    {
+      "id": "d4e5f6a7-0001-0001-0001-000000000004",
+      "name": "Get Top Items",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1000, 300],
+      "parameters": {
+        "method": "GET",
+        "url": "=http://lidl-api:8000/top?days={{ $json.days }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "d4e5f6a7-0001-0001-0001-000000000005",
+      "name": "Format Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1250, 300],
+      "parameters": {
+        "jsCode": "const items = $input.first().json.items || [];\nconst days = $input.first().json.days || 30;\nlet msg = `\u{1F6D2} Shopping suggestions (last ${days} days):\\n\\n`;\nif (items.length === 0) {\n  msg += 'No receipt data for this period.';\n} else {\n  items.slice(0, 10).forEach((item, i) => {\n    msg += `${i + 1}. ${item.name} (${item.count}×)\\n`;\n  });\n}\nreturn [{ json: { message: msg.trim() } }];"
+      }
+    },
+    {
+      "id": "d4e5f6a7-0001-0001-0001-000000000006",
+      "name": "Send to Signal",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1500, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "http://signal-cli-rest-api:8080/v2/send",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ message: $json.message, number: $env.SIGNAL_PHONE_NUMBER, recipients: [$env.SIGNAL_GROUP_ID] }) }}",
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "Signal Webhook": {
+      "main": [[{"node": "Is Shopping Command", "type": "main", "index": 0}]]
+    },
+    "Is Shopping Command": {
+      "main": [
+        [{"node": "Extract Days", "type": "main", "index": 0}],
+        []
+      ]
+    },
+    "Extract Days": {
+      "main": [[{"node": "Get Top Items", "type": "main", "index": 0}]]
+    },
+    "Get Top Items": {
+      "main": [[{"node": "Format Message", "type": "main", "index": 0}]]
+    },
+    "Format Message": {
+      "main": [[{"node": "Send to Signal", "type": "main", "index": 0}]]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "auth-failure-alert"
+  },
+  "id": "ondemand-shopping-list"
+}
