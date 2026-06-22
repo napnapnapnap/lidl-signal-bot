@@ -52,3 +52,13 @@ fi
 # ── Data directories ──────────────────────────────────────────────────────────
 mkdir -p /data/n8n /data/signal-cli /data/receipts
 chmod -R 777 /data
+
+# ── Docker data root on persistent disk ───────────────────────────────────────
+# Playwright + n8n images are ~1.5 GB total — too large for the 10 GB boot disk.
+# Moving Docker's storage to /data keeps the OS disk free.
+mkdir -p /data/docker
+DAEMON_JSON=/etc/docker/daemon.json
+if ! grep -q '\"data-root\"' "$DAEMON_JSON" 2>/dev/null; then
+  echo '{"data-root": "/data/docker"}' > "$DAEMON_JSON"
+  systemctl restart docker
+fi
