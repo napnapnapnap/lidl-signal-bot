@@ -26,7 +26,7 @@ services:
     environment:
       - MODE=normal
     volumes:
-      - /data/signal-cli:/root/.local/share/signal-cli
+      - /data/signal-cli:/home/.local/share/signal-cli
     ports:
       - "127.0.0.1:8080:8080"
 
