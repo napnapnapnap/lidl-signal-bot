@@ -734,7 +734,11 @@ def parse_html_receipt(receipt_html: str) -> dict[str, Any]:
         articles.append(
             {
                 "article_id": art_id.group(1) if art_id else None,
-                "description": desc.group(1) if desc else None,
+                "description": (
+                    m.group(1).strip()
+                    if (m := re.match(r'^(.*?)\s{2,}', visible))
+                    else (desc.group(1) if desc else None)
+                ),
                 "quantity": parse_float(quantity.group(1) if quantity else None) or 1.0,
                 "unit_price": parse_float(unit_price.group(1) if unit_price else None),
                 "line_total": parse_float(total_match.group(1) if total_match else None),
