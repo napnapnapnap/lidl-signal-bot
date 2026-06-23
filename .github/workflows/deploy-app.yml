@@ -42,7 +42,7 @@ jobs:
             fi
 
             cd /opt/lidl
-            git pull
+            git fetch origin && git reset --hard origin/main
 
             # Write .env file using printf to safely handle special characters
             {
